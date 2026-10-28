@@ -1,6 +1,6 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
     Alert,
     FlatList,
@@ -8,6 +8,7 @@ import {
     StatusBar,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -21,6 +22,10 @@ export const FieldListScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const [fields, setFields] = useState<Field[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  
+  // State phục vụ Tìm kiếm & Lọc nâng cao
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedFilter, setSelectedFilter] = useState<'Tất cả' | '5 người' | '7 người' | 'Hoạt động'>('Tất cả');
 
   const loadData = async () => {
     await initData();
@@ -37,18 +42,29 @@ export const FieldListScreen = () => {
   const activeCount = fields.filter((f) => f.status === 'Hoạt động').length;
   const maintenanceCount = fields.length - activeCount;
 
+  // Logic lọc dữ liệu thông minh
+  const filteredFields = useMemo(() => {
+    return fields.filter((field) => {
+      const matchesSearch = field.name.toLowerCase().includes(searchQuery.toLowerCase().trim());
+      if (!matchesSearch) return false;
+
+      if (selectedFilter === '5 người') return field.type === '5 người';
+      if (selectedFilter === '7 người') return field.type === '7 người';
+      if (selectedFilter === 'Hoạt động') return field.status === 'Hoạt động';
+      return true;
+    });
+  }, [fields, searchQuery, selectedFilter]);
+
   const handleDelete = (field: Field) => {
-    // Kiểm tra không cho xoá sân đang có lượt đặt
     if (bookings.some((b) => b.fieldId === field.id)) {
       Alert.alert('Không thể xoá', 'Sân này đang có lượt đặt, không được phép xoá!');
       return;
     }
 
-    // Xác nhận trước khi xoá
     Alert.alert('Xác nhận xoá', `Bạn có chắc chắn muốn xoá ${field.name}?`, [
       { text: 'Hủy', style: 'cancel' },
       {
-        text: 'Xoá',
+        text: 'Xoá sân',
         style: 'destructive',
         onPress: async () => {
           const updated = fields.filter((f) => f.id !== field.id);
@@ -61,9 +77,9 @@ export const FieldListScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content"/>
+      <StatusBar barStyle="dark-content" />
       
-      {/* Bảng thống kê số sân */}
+      {/* 1. Dashboard Thống kê tổng quan */}
       <View style={styles.dashboardContainer}>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>Tổng số sân</Text>
@@ -79,28 +95,59 @@ export const FieldListScreen = () => {
         </View>
       </View>
 
-      {/* Tiêu đề & Nút thêm sân */}
+      {/* 2. Thanh Tìm kiếm & Lọc nhanh */}
+      <View style={styles.searchSection}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="🔍 Tìm kiếm sân bóng theo tên..."
+          placeholderTextColor={COLORS.disabled}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        
+        {/* Chips Lọc dữ liệu */}
+        <View style={styles.filterContainer}>
+          {(['Tất cả', '5 người', '7 người', 'Hoạt động'] as const).map((filter) => {
+            const isSelected = selectedFilter === filter;
+            return (
+              <TouchableOpacity
+                key={filter}
+                style={[styles.filterChip, isSelected && styles.filterChipActive]}
+                onPress={() => setSelectedFilter(filter)}
+              >
+                <Text style={[styles.filterChipText, isSelected && styles.filterChipTextActive]}>
+                  {filter}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* 3. Tiêu đề danh sách & Nút thêm sân */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>
-          Danh sách sân ({activeCount}/{fields.length} hoạt động)
+          Danh sách cụm sân ({filteredFields.length})
         </Text>
         <TouchableOpacity
           style={styles.addBtn}
           activeOpacity={0.8}
           onPress={() => navigation.navigate('FieldForm', {})}
         >
-          <Text style={styles.addBtnText}>+ Thêm sân</Text>
+          <Text style={styles.addBtnText}>+ Thêm sân mới</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Danh sách FlatList */}
+      {/* 4. Danh sách FlatList Cards */}
       <FlatList
-        data={fields}
+        data={filteredFields}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => {
           const isOperating = item.status === 'Hoạt động';
+          const fieldBookingsCount = bookings.filter((b) => b.fieldId === item.id).length;
+
           return (
             <TouchableOpacity
               style={styles.card}
@@ -110,9 +157,8 @@ export const FieldListScreen = () => {
               <View style={styles.cardHeader}>
                 <View style={styles.titleGroup}>
                   <Text style={styles.fieldName}>{item.name}</Text>
-                  <Text style={styles.typeTag}>Sân {item.type}</Text>
+                  <Text style={styles.typeTag}>Sân loại {item.type} • {fieldBookingsCount} lượt đặt</Text>
                 </View>
-                {/* Nhãn màu hiển thị trạng thái */}
                 <View
                   style={[
                     styles.badge,
@@ -137,7 +183,7 @@ export const FieldListScreen = () => {
               </View>
 
               <View style={styles.priceRow}>
-                <Text style={styles.priceLabel}>Giá thuê:</Text>
+                <Text style={styles.priceLabel}>Giá thuê sân:</Text>
                 <Text style={styles.priceValue}>
                   {item.pricePerHour.toLocaleString('vi-VN')}{' '}
                   <Text style={styles.unitText}>đ/giờ</Text>
@@ -149,13 +195,19 @@ export const FieldListScreen = () => {
                   style={[styles.actionBtn, styles.editBtn]}
                   onPress={() => navigation.navigate('FieldForm', { field: item })}
                 >
-                  <Text style={styles.editBtnText}>Chỉnh sửa</Text>
+                  <Text style={styles.editBtnText}>Sửa</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.deleteBtn]}
                   onPress={() => handleDelete(item)}
                 >
-                  <Text style={styles.deleteBtnText}>Xoá sân</Text>
+                  <Text style={styles.deleteBtnText}>Xoá</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.detailBtn]}
+                  onPress={() => navigation.navigate('FieldDetail', { fieldId: item.id })}
+                >
+                  <Text style={styles.detailBtnText}>Chi tiết & Đặt sân →</Text>
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
@@ -163,7 +215,7 @@ export const FieldListScreen = () => {
         }}
         ListEmptyComponent={
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>Chưa có dữ liệu sân bóng.</Text>
+            <Text style={styles.emptyText}>Không tìm thấy sân bóng phù hợp.</Text>
           </View>
         }
       />
@@ -190,23 +242,61 @@ const styles = StyleSheet.create({
   },
   statLabel: { fontSize: 11, color: COLORS.textSecondary, fontWeight: '600', marginBottom: 4 },
   statValue: { fontSize: 18, fontWeight: 'bold', color: COLORS.textPrimary },
+  searchSection: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: COLORS.cardBg,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingBottom: 12,
+  },
+  searchInput: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: COLORS.textPrimary,
+    marginBottom: 10,
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.primary,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  filterChipTextActive: {
+    color: COLORS.white,
+  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingTop: 14,
+    paddingBottom: 4,
   },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: COLORS.textPrimary },
+  sectionTitle: { fontSize: 15, fontWeight: 'bold', color: COLORS.textPrimary },
   addBtn: {
     backgroundColor: COLORS.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
     ...SHADOWS.small,
   },
-  addBtnText: { color: COLORS.white, fontWeight: 'bold', fontSize: 13 },
+  addBtnText: { color: COLORS.white, fontWeight: 'bold', fontSize: 12 },
   listContent: { padding: 16 },
   card: {
     backgroundColor: COLORS.cardBg,
@@ -221,11 +311,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   titleGroup: { flex: 1 },
   fieldName: { fontSize: 18, fontWeight: 'bold', color: COLORS.textPrimary, marginBottom: 2 },
-  typeTag: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  typeTag: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '500' },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -247,12 +337,14 @@ const styles = StyleSheet.create({
   priceLabel: { fontSize: 13, color: COLORS.textSecondary },
   priceValue: { fontSize: 17, fontWeight: 'bold', color: COLORS.primary },
   unitText: { fontSize: 12, color: COLORS.textSecondary, fontWeight: 'normal' },
-  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
-  actionBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 6 },
+  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6 },
+  actionBtn: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 6 },
   editBtn: { backgroundColor: '#F1F5F9' },
   editBtnText: { color: COLORS.textPrimary, fontWeight: '600', fontSize: 12 },
   deleteBtn: { backgroundColor: COLORS.errorBg },
   deleteBtnText: { color: COLORS.error, fontWeight: '600', fontSize: 12 },
+  detailBtn: { backgroundColor: COLORS.primaryLight },
+  detailBtnText: { color: COLORS.primaryDark, fontWeight: 'bold', fontSize: 12 },
   emptyBox: { alignItems: 'center', marginTop: 40 },
-  emptyText: { color: COLORS.textSecondary, fontSize: 15 },
+  emptyText: { color: COLORS.textSecondary, fontSize: 14 },
 });
